@@ -1,0 +1,34 @@
+#!/bin/bash
+
+if [ $# -lt 1 ] ; then
+  echo "usage: $0 domain";
+  exit
+fi
+
+domain=${1#www.}
+dom=$(echo "$domain" | awk -F. '{print$1}')
+sa=/etc/apache2/sites-available
+vhost_wpmu=000-wordpress.conf
+
+if [[ ! -f $sa/$domain.conf ]]; then
+  wpmu_blog=$(sudo -u www-data wp site list --domain="$domain" --field=blog_id --path=/home/www/wordpress 2>/dev/null)
+  if [[ -z $wpmu_blog ]]; then
+    error_msg="$domain does not exist as either single-site or in Wordpress Network"
+  fi
+else
+  docroot=$(grep -E 'DocumentRoot (.*)$' $sa/"$domain".conf 2>/dev/null| awk '{print $NF}')
+  servername=$(grep -E 'ServerName (.*)$' $sa/"$domain".conf 2>/dev/null| awk '{print $NF}')
+fi
+if [[ ! -f $sa/${domain}_ssl.conf ]]; then
+  echo "Looks like there is no SSL certificate on ${domain}"
+  exit 1
+fi
+
+sudo -u "$dom" wp --path=/home/www/"$domain" search-replace http://"$domain" https://"$domain" --dry-run
+echo -n "Replace http with https for $domain (y/n): "
+read n
+if [[ $n != "y" ]];then
+  echo "got $n, expected y"
+  exit 1
+fi
+sudo -u "$dom" wp --path=/home/www/"$domain" search-replace http://"$domain" https://"$domain" --quiet

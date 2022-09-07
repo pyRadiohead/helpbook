@@ -1,0 +1,121 @@
+#!/bin/bash
+
+if [ $# -lt 1 ] ; then
+echo "usage: $0 domain_to_add [redirect_to_domain]";
+exit
+fi
+
+domain=$1
+echo -n "Add wordpress on $domain (y/n): "
+read wp
+
+u=$2
+p=$3
+
+#redirect=""
+#if [ -n "$2" ]; then
+#redirect="RedirectMatch 301 / http://$2/"
+#fi
+
+dom=$(echo "$domain" | awk -F. '{print$1}')
+useradd -s /bin/false -r "$dom"
+
+echo "[$dom]
+user = $dom
+group = $dom
+listen = /var/run/php7.3-fpm-$dom.sock
+listen.owner = $dom
+listen.group = www-data
+listen.mode = 0660
+pm = ondemand
+pm.max_children = 5
+pm.process_idle_timeout = 10s
+pm.max_requests = 10000
+request_terminate_timeout = 300
+chdir = /" >> /etc/php/7.3/fpm/pool.d/"$dom".conf
+
+
+echo "<VirtualHost *:80>
+	ServerAdmin serveradmin@$domain
+	DocumentRoot /home/www/$domain
+	ServerName $domain
+	ServerAlias www.$domain
+	ErrorLog /home/logs/$domain-error.log
+	CustomLog /home/logs/$domain-access.log combined
+
+        <Directory / >
+                Options FollowSymLinks
+                AllowOverride None
+        </Directory>
+
+        <Directory /home/www/$domain>
+                Options -Indexes +FollowSymLinks +MultiViews
+                AllowOverride All
+                Order allow,deny
+                allow from all
+                Require all granted
+        </Directory>
+
+        <FilesMatch "\.php$">
+          SetHandler \"proxy:unix:///var/run/php7.3-fpm-$dom.sock|fcgi://php7.3-fpm/\"
+        </FilesMatch>
+
+        <IfModule mod_alias.c>
+                RedirectMatch 403 /xmlrpc.php
+        </IfModule>
+
+	$redirect
+</VirtualHost>" > /etc/apache2/sites-available/"$domain".conf
+
+mkdir /home/www/$domain
+if [[ $wp = 'y' ]]; then
+  # shellcheck disable=SC2046
+  # shellcheck disable=SC2006
+  # shellcheck disable=SC2005
+  dbpass=$( echo `openssl rand -hex 10`)
+  # shellcheck disable=SC2046
+  # shellcheck disable=SC2006
+  # shellcheck disable=SC2005
+  admpass=$( echo `openssl rand -hex 4`)
+  # shellcheck disable=SC2046
+  # shellcheck disable=SC2006
+  # shellcheck disable=SC2005
+  db=wp_$(echo "$domain" | sed -r 's/(\.|-)/_/g' | cut -c -6 )$( echo `openssl rand -hex 3`)
+  echo "$db" "$dbpass"
+  # shellcheck disable=SC2046
+  mysql -p$(<~/.mysqlpass ) -e "create database $db" && mysql -p$(<~/.mysqlpass ) -e "grant all on $db.* to $db identified by '$dbpass'"
+  chown -R www-data:www-data /home/www/"$domain"
+  sudo -u www-data wp --path=/home/www/"$domain" core download --locale=en_GB
+  sudo -u www-data wp --path=/home/www/"$domain" core config --dbname="$db" --dbuser="$db" --dbpass="$dbpass" --locale=en_GB
+  sudo -u www-data wp --path=/home/www/"$domain" core install --url="$domain" --title="$domain" --admin_user="$u" --admin_email="$u"@"$domain" --admin_password="$p"
+  sudo -u www-data wp --path=/home/www/"$domain" comment delete 1
+  sudo -u www-data wp --path=/home/www/"$domain" post delete 1
+  sudo -u www-data wp --path=/home/www/"$domain" plugin install under-construction-page
+  sudo -u www-data wp --path=/home/www/"$domain" plugin activate under-construction-page
+
+  echo "RewriteEngine On
+        RewriteBase /
+        RewriteRule ^index\.php$ - [L]
+        # add a trailing slash to /wp-admin
+        RewriteRule ^wp-admin$ wp-admin/ [R=301,L]
+
+        RewriteCond %{REQUEST_FILENAME} -f [OR]
+        RewriteCond %{REQUEST_FILENAME} -d
+        RewriteRule ^ - [L]
+        RewriteRule ^(wp-(content|admin|includes).*) $1 [L]
+        RewriteRule ^(.*\.php)$ wp/$1 [L]
+        RewriteRule . index.php [L]" | sed 's/^ *//' >/home/www/"$domain"/.htaccess
+
+  if [[ ! -d $HOME/sites ]]; then
+	  mkdir "$HOME"/sites
+  fi
+
+  chown -R "$dom":www-data /home/www/"$domain"
+  echo "http://$domain/wp-admin - $u - $p" | tee "$HOME"/sites/"$domain".txt
+fi
+
+/usr/sbin/a2ensite "$domain".conf
+echo "$domain added...restarting apache"
+ulimit -n109283
+apache2ctl graceful
+service php7.3-fpm reload
