@@ -1,0 +1,6 @@
+polylang
+chl-change-html-lang
+custom-fonts
+svg-support
+wordpress-seo
+wp-retina-2x
