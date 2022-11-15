@@ -1,6 +1,0 @@
-cat /tmp/list | while read a b c; do yes | wp_update $a $b $c; done
-systemctl restart  php7.3-fpm.service
-apache2ctl restart
-cd  /etc/apache2/sites-available/
-cd /etc/php/7.3/fpm/pool.d
-
